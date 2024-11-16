@@ -6,9 +6,9 @@ from mathutils import Vector, Quaternion, Matrix, Euler
 from bpy_extras.io_utils import ImportHelper
 from math import radians, tan
 from .zwoLib.ReadZWO import read_zwo
-from .zwoLib.zwo import *
-from .zwoLib.texDict import *
-from .zwoLib.zwoSkeletalAnimation import Entry
+from .zwoLib.zwo.zwo import *
+from .zwoLib.utils.texDict import *
+from .zwoLib.zwo.zwoSkeletalAnimation import Entry
 
 
 class ZWO_IMPORTER_OT_IMPORT(bpy.types.Operator, ImportHelper):

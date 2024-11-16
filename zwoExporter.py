@@ -1,15 +1,14 @@
 import bpy
-from .zwoLib.zwo import *
-from .zwoLib.zwoMesh import *
-from .zwoLib.zwoTypes import *
-from .zwoLib.zwoEntity import *
-from .zwoLib.zwoEntity3D import *
-from .zwoLib.zwoMaterial import *
-from .zwoLib.zwoSkeleton import *
+from .zwoLib.zwo.zwo import *
+from .zwoLib.zwo.zwoMesh import *
+from .zwoLib.zwo.zwoTypes import *
+from .zwoLib.zwo.zwoEntity import *
+from .zwoLib.zwo.zwoEntity3D import *
+from .zwoLib.zwo.zwoMaterial import *
+from .zwoLib.zwo.zwoSkeleton import *
 import sys
 from mathutils import Matrix, Vector
 import bmesh
-from .zwoLib.PyBinaryReader.binary_reader import *
 from bpy_extras.io_utils import ExportHelper
 from bpy.types import Operator, MeshLoopTriangle
 from bpy.props import CollectionProperty, StringProperty
