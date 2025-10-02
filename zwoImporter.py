@@ -375,9 +375,6 @@ def import_zwo(zwoPath, texturesPath):
                 
                 loc, rot, scale = matrix.decompose()
 
-                trans = loc
-                bone_rot = rot.inverted()
-
 
                 entry: Entry
                 entryType = entry.EntryTypeFlag
@@ -385,21 +382,16 @@ def import_zwo(zwoPath, texturesPath):
                     continue
                 elif entryType == 1:
                     curveIndex = entry.CurveStartIndex
-                    rotation = curves[curveIndex]
-                    rotation = (rotation[3], rotation[0], rotation[1], rotation[2])
-                    
-                    anim_rot = Quaternion(rotation)
 
-                    bone_rot.rotate(anim_rot)
-
-
-                    bone.rotation_quaternion = rot
+                    bone.rotation_quaternion = convertRotation(curves[curveIndex], rot)
                     bone.keyframe_insert(data_path = "rotation_quaternion", frame = 0)
                     curveIndex += 1
 
                     #loc = Vector(curves[curveIndex][x] * 0.01 for x in range(3))
                     
-                    bone.location = loc
+                    new_loc = Vector(curves[curveIndex][:3])
+                    
+                    bone.location = new_loc
                     bone.keyframe_insert(data_path = "location", frame = 0)
                     curveIndex += 1
 
@@ -409,21 +401,16 @@ def import_zwo(zwoPath, texturesPath):
                 
                 elif entryType == 3:
                     curveIndex = entry.CurveStartIndex
-
-                    rotation = curves[curveIndex]
-                    rotation = (rotation[3], rotation[0], rotation[2], rotation[1])
-                    bone.rotation_quaternion = Quaternion(rotation)
+                
+                    bone.rotation_quaternion = convertRotation(curves[curveIndex], rot)
                     bone.keyframe_insert(data_path = "rotation_quaternion", frame = 0)
                     curveIndex += 1
 
                     #location
 
-                    bone_loc = Vector(curves[curveIndex][x] * 0.01 for x in range(3))
-                    #bind_loc = trans * 0.01
-                    #bone_loc.rotate(bone_rot)
-                    #bind_loc.rotate(bone_rot)
-
-                    bone.location = bone_loc
+                    new_loc = Vector(curves[curveIndex][:3])
+                    
+                    bone.location = new_loc
                     bone.keyframe_insert(data_path = "location", frame = 0)
                     curveIndex += 1
 
@@ -434,24 +421,19 @@ def import_zwo(zwoPath, texturesPath):
                     curveIndex += 1
 
                     for i in range(anim.FrameCount - 1):
-                        rotation = curves[curveIndex]
-                        rotation = (rotation[3], rotation[0], rotation[1], rotation[2])
-                        bone.rotation_quaternion = rot
-                        #bone.matrix = Quaternion(rotation).to_matrix().to_4x4() @ matrix
+                        bone.rotation_quaternion = convertRotation(curves[curveIndex], rot)
                         bone.keyframe_insert(data_path = "rotation_quaternion", frame = i + 1)
                         curveIndex += 1
                     
                 elif entryType == 7:
 
                     curveIndex = entry.CurveStartIndex
-                    rotation = curves[curveIndex]
-                    rotation = (rotation[3], rotation[0], rotation[2], rotation[1])
-                    rotation = Quaternion(rotation)
-                    bone.rotation_quaternion = rotation
+                    bone.rotation_quaternion = convertRotation(curves[curveIndex], rot)
                     bone.keyframe_insert(data_path = "rotation_quaternion", frame = 0)
                     curveIndex += 1
 
-                    bone.location = Vector(curves[curveIndex][x] * 0.01 for x in range(3))
+                    new_loc = Vector(curves[curveIndex][:3])
+                    bone.location = new_loc
                     bone.keyframe_insert(data_path = "location", frame = 0)
                     curveIndex += 1
 
@@ -460,19 +442,29 @@ def import_zwo(zwoPath, texturesPath):
                     curveIndex += 1
 
                     for i in range(anim.FrameCount - 1):
-                        rotation = curves[curveIndex]
-                        rotation = (rotation[3], rotation[0], rotation[1], rotation[2])
-                        rotation = Quaternion(rotation).conjugated()
-                        bone.rotation_quaternion = rot
+                        bone.rotation_quaternion = convertRotation(curves[curveIndex], rot)
                         bone.keyframe_insert(data_path = "rotation_quaternion", frame = i + 1)
                         curveIndex += 1
 
-                        location = Vector(curves[curveIndex][x] * 0.01 for x in range(3))
-                        location = (location[0], location[1], location[2])
-                        bone.location = loc 
+                        new_loc = Vector(curves[curveIndex][:3])
+                        bone.location = new_loc
                         bone.keyframe_insert(data_path = "location", frame = i + 1)
                         curveIndex += 1
 
+
+def convertRotation(rotation, bone_rotation):
+    rotation = (rotation[3], rotation[0], rotation[1], rotation[2])
+    
+    return bone_rotation.rotation_difference(Quaternion(rotation))
+
+def insertFrames(action, group_name, data_path, values, values_count):
+        if len(values):
+            for i in range(values_count):
+                fc = action.fcurves.new(data_path=data_path, index=i, action_group=group_name)
+                fc.keyframe_points.add(len(values.keys()))
+                fc.keyframe_points.foreach_set('co', [x for co in list(map(lambda f, v: (f, v[i]), values.keys(), values.values())) for x in co])
+
+                fc.update()
 '''
 
 

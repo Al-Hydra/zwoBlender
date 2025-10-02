@@ -6,9 +6,7 @@ from .zwoLib.zwo.zwoEntity import *
 from .zwoLib.zwo.zwoEntity3D import *
 from .zwoLib.zwo.zwoMaterial import *
 from .zwoLib.zwo.zwoSkeleton import *
-import sys
 from mathutils import Matrix, Vector
-import bmesh
 from bpy_extras.io_utils import ExportHelper
 from bpy.types import Operator, MeshLoopTriangle
 from bpy.props import CollectionProperty, StringProperty
@@ -235,7 +233,7 @@ class ZWO_IMPORTER_OT_EXPORT(Operator, ExportHelper):
         
         fbuffer = FaceBuffer()
         fbuffer.TrianglesType = 1
-        fbuffer.IndexType = 0
+        fbuffer.IndexType = 1
         
         fbuffer.Faces = tris
         
