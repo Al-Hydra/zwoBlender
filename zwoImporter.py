@@ -140,15 +140,31 @@ def import_zwo(zwoPath, texturesPath):
     for chunk in zwo.Entities:
         if chunk.Type == zwoTypes.Skeleton:
             Skeleton = chunk
+        elif chunk.Type == zwoTypes.SkeletalAnimation:
+            Animations.append(chunk)
         elif chunk.Type == zwoTypes.Mesh:
             Models.append(chunk)
         elif chunk.Type == zwoTypes.Material:
             Materials.append(chunk)
-        elif chunk.Type == zwoTypes.SkeletalAnimation:
-            Animations.append(chunk)
 
     BoneDict = {}
     ReverseBoneDict = {}
+    
+    
+    def instancedModel(Model):
+        # get the original model from blender
+        obj = bpy.data.objects.get(Model.Entity3D.InstancedObjectName)
+        if obj:
+            # create a new object but use the data from the original
+            new_obj = bpy.data.objects.new(Model.Entity.Name, obj.data)
+            
+            # transform the instance using entity3d matrix
+            new_obj.matrix_world = Matrix(Model.Entity3D.WorldTransformer.Matrix)
+            
+            return new_obj
+        else:
+            print(f"Instance target {Model.Entity3D.InstancedObjectName} not found")
+            return None
 
 
     def RigidModel(Model):
@@ -190,8 +206,8 @@ def import_zwo(zwoPath, texturesPath):
                 for loop_index in poly.loop_indices:
                     uv = vertex_buffer.Vertices[mesh.loops[loop_index].vertex_index].UVs[i]
                     mesh.uv_layers[0].data[loop_index].uv = (uv[0], 1 - uv[1])
-        
-        #obj.matrix_world = Matrix(Model.Geometry.Transformer2.Matrix) @ Matrix(Model.Geometry.Transformer1.Matrix)
+
+        #obj.data.transform(Matrix(Model.Geometry.LocalTransformer.Matrix) @ Matrix(Model.Geometry.WorldTransformer.Matrix))
         obj.data.transform(Matrix(Model.Geometry.LocalTransformer.Matrix))
         obj.matrix_world = Matrix(Model.Geometry.WorldTransformer.Matrix)
         
@@ -245,7 +261,6 @@ def import_zwo(zwoPath, texturesPath):
         bm.to_mesh(mesh)
         bm.free()
         
-        #mesh.transform(Matrix(Model.Geometry.Transformer2.Matrix))
         
         for i in range(vertex_buffer.UVPerVertex):
             uv_layer = mesh.uv_layers.new(name = f"UVMap_{i}")
@@ -254,6 +269,9 @@ def import_zwo(zwoPath, texturesPath):
                     uv = vertex_buffer.Vertices[mesh.loops[loop_index].vertex_index].UVs[i]
                     mesh.uv_layers[0].data[loop_index].uv = (uv[0], 1 - uv[1])
         
+        
+        obj.data.transform(Matrix(Model.Geometry.LocalTransformer.Matrix))
+        obj.matrix_world = Matrix(Model.Geometry.WorldTransformer.Matrix)
         return obj
 
 
@@ -265,6 +283,20 @@ def import_zwo(zwoPath, texturesPath):
         
         bpy.context.view_layer.objects.active = armature
         bpy.ops.object.mode_set(mode='EDIT')
+        
+        '''for i, zwoBone in enumerate(Skeleton.Bones):
+            BoneDict[zwoBone.Name] = i
+
+            edit_bone = armature.data.edit_bones.new(zwoBone.Name)
+            edit_bone.matrix = Matrix(zwoBone.Matrix)
+            edit_bone.tail = edit_bone.head + Vector((0, 2, 0))
+        
+        # set parents
+        for i, zwoBone in enumerate(Skeleton.Bones):
+            edit_bone = armature.data.edit_bones[i]
+            for childIndex in zwoBone.ChildIndices:
+                child_bone = armature.data.edit_bones[childIndex]
+                child_bone.parent = edit_bone'''
 
         def add_bone(bone, parent, index):
             boneName = bone.Name
@@ -275,8 +307,8 @@ def import_zwo(zwoPath, texturesPath):
             b.tail += Vector((0,3,0))
             
             if parent:
-                b.matrix = Matrix(bone.Matrix)
                 b.parent = parent
+                b.matrix = Matrix(bone.Matrix)
 
             parent = b
             
@@ -331,6 +363,10 @@ def import_zwo(zwoPath, texturesPath):
 
 
     for Model in Models:
+        # check if it's an instanced mesh
+        if Model.isInstance:
+            obj = instancedModel(Model)
+            zwoCollection.objects.link(obj)
         if Model.Entity3D.MeshType == 6:
             obj = DeformableModel(Model)
             zwoCollection.objects.link(obj)
@@ -338,7 +374,7 @@ def import_zwo(zwoPath, texturesPath):
             obj = RigidModel(Model)
             zwoCollection.objects.link(obj)
 
-    '''if Animations:
+    if Animations:
         if Skeleton:
             AnimSkeleton = Skeleton
         else:
@@ -369,29 +405,24 @@ def import_zwo(zwoPath, texturesPath):
                 b = obj.data.bones[bone.name]
 
                 if b.parent:
-                    matrix = b.parent.matrix_local @ b.matrix_local
+                    matrix = b.parent.matrix_local.inverted() @ b.matrix_local
                 else:
                     matrix = b.matrix_local
-                
+
                 loc, rot, scale = matrix.decompose()
 
 
                 entry: Entry
                 entryType = entry.EntryTypeFlag
-                if entryType == 0:
-                    continue
-                elif entryType == 1:
-                    curveIndex = entry.CurveStartIndex
-
+                curveIndex = entry.CurveStartIndex
+                if entryType & 1:
                     bone.rotation_quaternion = convertRotation(curves[curveIndex], rot)
                     bone.keyframe_insert(data_path = "rotation_quaternion", frame = 0)
                     curveIndex += 1
 
-                    #loc = Vector(curves[curveIndex][x] * 0.01 for x in range(3))
-                    
                     new_loc = Vector(curves[curveIndex][:3])
-                    
-                    bone.location = new_loc
+                    bone.location = Vector(new_loc) - loc
+                    #bone.location = Vector((new_loc[0], new_loc[2], new_loc[1])) - loc
                     bone.keyframe_insert(data_path = "location", frame = 0)
                     curveIndex += 1
 
@@ -399,73 +430,51 @@ def import_zwo(zwoPath, texturesPath):
                     bone.keyframe_insert(data_path = "scale", frame = 0)
                     curveIndex += 1
                 
-                elif entryType == 3:
-                    curveIndex = entry.CurveStartIndex
-                
-                    bone.rotation_quaternion = convertRotation(curves[curveIndex], rot)
-                    bone.keyframe_insert(data_path = "rotation_quaternion", frame = 0)
-                    curveIndex += 1
-
-                    #location
-
-                    new_loc = Vector(curves[curveIndex][:3])
-                    
-                    bone.location = new_loc
-                    bone.keyframe_insert(data_path = "location", frame = 0)
-                    curveIndex += 1
-
-
-
-                    bone.scale = Vector(curves[curveIndex][x] for x in range(3))
-                    bone.keyframe_insert(data_path = "scale", frame = 0)
-                    curveIndex += 1
+                if entryType == 3:
 
                     for i in range(anim.FrameCount - 1):
+                        #new_rotation = curves[curveIndex]
+                        
                         bone.rotation_quaternion = convertRotation(curves[curveIndex], rot)
                         bone.keyframe_insert(data_path = "rotation_quaternion", frame = i + 1)
                         curveIndex += 1
-                    
+                
+                elif entryType == 5:
+
+                    for i in range(anim.FrameCount - 1):
+                        new_loc = Vector(curves[curveIndex][:3])
+                        bone.location = Vector(new_loc) - loc
+                        #bone.location = Vector((new_loc[0], new_loc[2], new_loc[1])) - loc
+                        bone.keyframe_insert(data_path = "location", frame = i + 1)
+                        curveIndex += 1
+
                 elif entryType == 7:
-
-                    curveIndex = entry.CurveStartIndex
-                    bone.rotation_quaternion = convertRotation(curves[curveIndex], rot)
-                    bone.keyframe_insert(data_path = "rotation_quaternion", frame = 0)
-                    curveIndex += 1
-
-                    new_loc = Vector(curves[curveIndex][:3])
-                    bone.location = new_loc
-                    bone.keyframe_insert(data_path = "location", frame = 0)
-                    curveIndex += 1
-
-                    bone.scale = Vector(curves[curveIndex][x] for x in range(3))
-                    bone.keyframe_insert(data_path = "scale", frame = 0)
-                    curveIndex += 1
-
                     for i in range(anim.FrameCount - 1):
                         bone.rotation_quaternion = convertRotation(curves[curveIndex], rot)
                         bone.keyframe_insert(data_path = "rotation_quaternion", frame = i + 1)
                         curveIndex += 1
 
                         new_loc = Vector(curves[curveIndex][:3])
-                        bone.location = new_loc
+                        bone.location = Vector(new_loc) - loc
+                        #bone.location = Vector((new_loc[0], new_loc[2], new_loc[1])) - loc
                         bone.keyframe_insert(data_path = "location", frame = i + 1)
                         curveIndex += 1
 
 
 def convertRotation(rotation, bone_rotation):
-    rotation = (rotation[3], rotation[0], rotation[1], rotation[2])
+    rotation = Quaternion((rotation[3], rotation[0], rotation[1], rotation[2]))
     
-    return bone_rotation.rotation_difference(Quaternion(rotation))
+    return bone_rotation.rotation_difference(rotation)
 
 def insertFrames(action, group_name, data_path, values, values_count):
-        if len(values):
-            for i in range(values_count):
-                fc = action.fcurves.new(data_path=data_path, index=i, action_group=group_name)
-                fc.keyframe_points.add(len(values.keys()))
-                fc.keyframe_points.foreach_set('co', [x for co in list(map(lambda f, v: (f, v[i]), values.keys(), values.values())) for x in co])
+    if len(values):
+        for i in range(values_count):
+            fc = action.fcurves.new(data_path=data_path, index=i, action_group=group_name)
+            fc.keyframe_points.add(len(values.keys()))
+            fc.keyframe_points.foreach_set('co', [x for co in list(map(lambda f, v: (f, v[i]), values.keys(), values.values())) for x in co])
 
-                fc.update()
-'''
+            fc.update()
+
 
 
 def menu_func_import(self, context):
