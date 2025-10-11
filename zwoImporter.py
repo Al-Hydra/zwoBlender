@@ -9,7 +9,7 @@ from .zwoLib.ReadZWO import read_zwo
 from .zwoLib.zwo.zwo import *
 from .zwoLib.utils.texDict import *
 from .zwoLib.zwo.zwoSkeletalAnimation import Entry
-
+import numpy as np
 
 class ZWO_IMPORTER_OT_IMPORT(bpy.types.Operator, ImportHelper):
     bl_label = "Import ZWO"
@@ -58,13 +58,21 @@ class ZWO_IMPORTER_OT_DROP(bpy.types.Operator):
             
             #check if it's a texture dict or a model
             if self.filepath.endswith(".dic") or self.filepath.endswith(".dip"):
-                dic: dicFile = read_tex_dictionary(self.filepath)
-                for texture in dic.Textures:
-                    tex_data = dic2dds(texture)
-                    tex = bpy.data.images.new(texture.Name, texture.Width, texture.Height)
-                    tex.pack(data=bytes(tex_data), data_len= len(tex_data))
-                    tex.source = "FILE"
-            else:
+                import_texture_dic(self.filepath)
+            
+            elif self.filepath.endswith(".zwo"):
+                #search for a .dip or .dic with the same name in the same folder
+                base_name = os.path.splitext(file.name)[0]
+                dip_path = os.path.join(self.directory, base_name + ".dip")
+                dic_path = os.path.join(self.directory, base_name + ".dic")
+                
+                if os.path.exists(dip_path):
+                    self.textures_path = dip_path
+                    import_texture_dic(self.textures_path)
+                elif os.path.exists(dic_path):
+                    self.textures_path = dic_path
+                    import_texture_dic(self.textures_path)
+
                 import_zwo(self.filepath, self.textures_path)
         
         elapsed_s = "{:.2f}s".format(perf_counter() - start_time)
@@ -115,6 +123,15 @@ class DIP_FH_IMPORT(bpy.types.FileHandler):
     def draw():
         pass
 
+def import_texture_dic(dicPath):
+    dic: dicFile = read_tex_dictionary(dicPath)
+        
+    for texture in dic.Textures:
+        if not bpy.data.images.get(texture.Name):
+            tex_data = dic2dds(texture)
+            tex = bpy.data.images.new(texture.Name, texture.Width, texture.Height)
+            tex.pack(data=bytes(tex_data), data_len= len(tex_data))
+            tex.source = "FILE"
 
 def import_zwo(zwoPath, texturesPath):
     zwo: zwoFile = read_zwo(zwoPath)
@@ -170,8 +187,6 @@ def import_zwo(zwoPath, texturesPath):
     def RigidModel(Model):
         mesh = bpy.data.meshes.new(Model.Entity.Name)
         obj = bpy.data.objects.new(Model.Entity.Name, mesh)
-        
-
 
         #assign materials
         for material in Model.Entity3D.Materials:
@@ -180,34 +195,76 @@ def import_zwo(zwoPath, texturesPath):
 
         bm = bmesh.new()
         
-        vertex_buffer = Model.VertexBuffers[0]
-        for v in vertex_buffer.Vertices:
-            bv = bm.verts.new(v.Position)
-            bv.normal = v.Normal
+        vertex_buffer = Model.VertexBuffers[0].Vertices
 
+        for v in vertex_buffer["position"]:
+            bm.verts.new(v)
+        
         bm.verts.ensure_lookup_table()
-        bm.verts.index_update()
-
+        
         for f in Model.FaceBuffer.Faces:
             try:
-                face = bm.faces.new([bm.verts[i] for i in f.Indices])
+                face = bm.faces.new([bm.verts[i] for i in f['indices']])
                 face.smooth = True
                 bm.faces.ensure_lookup_table()
                 bm.faces.index_update()
-                face.material_index = f.MaterialIndex
+                face.material_index = f['materialIndex']
             except:
                 pass
         bm.to_mesh(mesh)
         bm.free()
         
-        for i in range(vertex_buffer.UVPerVertex):
-            uv_layer = mesh.uv_layers.new(name = f"UVMap_{i}")
-            for poly in mesh.polygons:
-                for loop_index in poly.loop_indices:
-                    uv = vertex_buffer.Vertices[mesh.loops[loop_index].vertex_index].UVs[i]
-                    mesh.uv_layers[0].data[loop_index].uv = (uv[0], 1 - uv[1])
-
-        #obj.data.transform(Matrix(Model.Geometry.LocalTransformer.Matrix) @ Matrix(Model.Geometry.WorldTransformer.Matrix))
+        #loops
+        loops = mesh.loops
+        loop_count = len(loops)
+        loop_vertex_indices = np.empty(loop_count, dtype=np.int32)
+        loops.foreach_get("vertex_index", loop_vertex_indices)
+        
+        if "normal" in vertex_buffer.dtype.names:
+            normals = vertex_buffer["normal"]
+            mesh.normals_split_custom_set_from_vertices(normals)
+        
+        if "uv0" in vertex_buffer.dtype.names:
+            uv_layer = mesh.uv_layers.new(name = "UVMap_0")
+            uvs = vertex_buffer["uv0"].copy()
+            uvs[:,1] = 1.0 - uvs[:,1]
+            loop_uvs = uvs[loop_vertex_indices]
+            uv_layer.data.foreach_set("uv", loop_uvs.flatten())
+            
+        if "uv1" in vertex_buffer.dtype.names:
+            uv_layer = mesh.uv_layers.new(name = "UVMap_1")
+            uvs = vertex_buffer["uv1"].copy()
+            uvs[:,1] = 1 - uvs[:,1]
+            loop_uvs = uvs[loop_vertex_indices]
+            uv_layer.data.foreach_set("uv", loop_uvs.flatten())
+        
+        if "uv2" in vertex_buffer.dtype.names:
+            uv_layer = mesh.uv_layers.new(name = "UVMap_2")
+            uvs = vertex_buffer["uv2"].copy()
+            uvs[:,1] = 1 - uvs[:,1]
+            loop_uvs = uvs[loop_vertex_indices]
+            uv_layer.data.foreach_set("uv", loop_uvs.flatten())
+        
+        if "uv3" in vertex_buffer.dtype.names:
+            uv_layer = mesh.uv_layers.new(name = "UVMap_3")
+            uvs = vertex_buffer["uv3"].copy()
+            uvs[:,1] = 1 - uvs[:,1]
+            loop_uvs = uvs[loop_vertex_indices]
+            uv_layer.data.foreach_set("uv", loop_uvs.flatten())
+        
+        if "color0" in vertex_buffer.dtype.names:
+            color_layer = mesh.vertex_colors.new(name = "Color_0")
+            colors = vertex_buffer["color0"] / 255.0
+            loop_colors = colors[loop_vertex_indices]
+            color_layer.data.foreach_set("color", loop_colors.flatten())
+        
+        if "color1" in vertex_buffer.dtype.names:
+            color_layer = mesh.vertex_colors.new(name = "Color_1")
+            colors = vertex_buffer["color1"] / 255.0
+            loop_colors = colors[loop_vertex_indices]
+            color_layer.data.foreach_set("color", loop_colors.flatten())
+            
+            
         obj.data.transform(Matrix(Model.Geometry.LocalTransformer.Matrix))
         obj.matrix_world = Matrix(Model.Geometry.WorldTransformer.Matrix)
         
@@ -221,7 +278,6 @@ def import_zwo(zwoPath, texturesPath):
         obj = bpy.data.objects.new(Model.Entity.Name, mesh)
         obj.parent = armature
         obj.modifiers.new("Armature", 'ARMATURE').object = armature
-        #obj.matrix_world = Matrix(Model.Geometry.Transformer1.Matrix)
         
 
         #assign materials
@@ -238,18 +294,13 @@ def import_zwo(zwoPath, texturesPath):
         w_layer = bm.verts.layers.deform.new("weights")
         
         
-        vertex_buffer = Model.VertexBuffers[0]
-        for v in vertex_buffer.Vertices:
-            bv = bm.verts.new(v.Position)
-            bv.normal = v.Normal
-            
-            for i in range(vertex_buffer.WeightPerVertex):
-                bv[w_layer][v.BoneIndices[i]] = v.BoneWeights[i]
+        vertex_buffer = Model.VertexBuffers[0].Vertices
+        for v in vertex_buffer["position"]:
+            bm.verts.new(v)
 
         bm.verts.ensure_lookup_table()
-        bm.verts.index_update()
 
-        for f in Model.FaceBuffer.Faces:
+        '''for f in Model.FaceBuffer.Faces:
             try:
                 face = bm.faces.new([bm.verts[i] for i in f.Indices])
                 face.smooth = True
@@ -257,21 +308,100 @@ def import_zwo(zwoPath, texturesPath):
                 bm.faces.index_update()
                 face.material_index = f.MaterialIndex
             except:
+                pass'''
+                
+        for f in Model.FaceBuffer.Faces:
+            try:
+                face = bm.faces.new([bm.verts[i] for i in f['indices']])
+                face.smooth = True
+                bm.faces.ensure_lookup_table()
+                bm.faces.index_update()
+                face.material_index = f['materialIndex']
+            except:
                 pass
         bm.to_mesh(mesh)
         bm.free()
         
+        if "boneIndex0" in vertex_buffer.dtype.names:
+            vertex_count = len(vertex_buffer)
+            weight_slots = 4  # Max 4 bone weights per vertex
+
+            # Make sure vertex groups exist
+            max_bone_idx = 0
+            for slot in range(weight_slots):
+                index_field = f"boneIndex{slot}"
+                if index_field in vertex_buffer.dtype.names:
+                    max_bone_idx = max(max_bone_idx, vertex_buffer[index_field].max())
+
+            for i in range(max_bone_idx + 1):
+                if i >= len(obj.vertex_groups):
+                    obj.vertex_groups.new(name=f"Bone_{i}")
+
+            # Assign weights one by one
+            for v_idx, vert in enumerate(vertex_buffer):
+                for slot in range(weight_slots):
+                    index_field = f"boneIndex{slot}"
+                    weight_field = f"boneWeight{slot}"
+                    if index_field in vertex_buffer.dtype.names and weight_field in vertex_buffer.dtype.names:
+                        b_idx = int(vert[index_field])
+                        w = float(vert[weight_field])
+                        if w > 0:
+                            obj.vertex_groups[b_idx].add([v_idx], w, 'REPLACE')
+
+
+        #loops
+        loops = mesh.loops
+        loop_count = len(loops)
+        loop_vertex_indices = np.empty(loop_count, dtype=np.int32)
+        loops.foreach_get("vertex_index", loop_vertex_indices)
         
-        for i in range(vertex_buffer.UVPerVertex):
-            uv_layer = mesh.uv_layers.new(name = f"UVMap_{i}")
-            for poly in mesh.polygons:
-                for loop_index in poly.loop_indices:
-                    uv = vertex_buffer.Vertices[mesh.loops[loop_index].vertex_index].UVs[i]
-                    mesh.uv_layers[0].data[loop_index].uv = (uv[0], 1 - uv[1])
+        if "normal" in vertex_buffer.dtype.names:
+            normals = vertex_buffer["normal"]
+            mesh.normals_split_custom_set_from_vertices(normals)
+        
+        if "uv0" in vertex_buffer.dtype.names:
+            uv_layer = mesh.uv_layers.new(name = "UVMap_0")
+            uvs = vertex_buffer["uv0"].copy()
+            uvs[:,1] = 1.0 - uvs[:,1]
+            loop_uvs = uvs[loop_vertex_indices]
+            uv_layer.data.foreach_set("uv", loop_uvs.flatten())
+            
+        if "uv1" in vertex_buffer.dtype.names:
+            uv_layer = mesh.uv_layers.new(name = "UVMap_1")
+            uvs = vertex_buffer["uv1"].copy()
+            uvs[:,1] = 1 - uvs[:,1]
+            loop_uvs = uvs[loop_vertex_indices]
+            uv_layer.data.foreach_set("uv", loop_uvs.flatten())
+        
+        if "uv2" in vertex_buffer.dtype.names:
+            uv_layer = mesh.uv_layers.new(name = "UVMap_2")
+            uvs = vertex_buffer["uv2"].copy()
+            uvs[:,1] = 1 - uvs[:,1]
+            loop_uvs = uvs[loop_vertex_indices]
+            uv_layer.data.foreach_set("uv", loop_uvs.flatten())
+        
+        if "uv3" in vertex_buffer.dtype.names:
+            uv_layer = mesh.uv_layers.new(name = "UVMap_3")
+            uvs = vertex_buffer["uv3"].copy()
+            uvs[:,1] = 1 - uvs[:,1]
+            loop_uvs = uvs[loop_vertex_indices]
+            uv_layer.data.foreach_set("uv", loop_uvs.flatten())
+        
+        if "color0" in vertex_buffer.dtype.names:
+            color_layer = mesh.vertex_colors.new(name = "Color_0")
+            colors = vertex_buffer["color0"] / 255.0
+            loop_colors = colors[loop_vertex_indices]
+            color_layer.data.foreach_set("color", loop_colors.flatten())
+        
+        if "color1" in vertex_buffer.dtype.names:
+            color_layer = mesh.vertex_colors.new(name = "Color_1")
+            colors = vertex_buffer["color1"] / 255.0
+            loop_colors = colors[loop_vertex_indices]
+            color_layer.data.foreach_set("color", loop_colors.flatten())
         
         
-        obj.data.transform(Matrix(Model.Geometry.LocalTransformer.Matrix))
-        obj.matrix_world = Matrix(Model.Geometry.WorldTransformer.Matrix)
+        #obj.data.transform(Matrix(Model.Geometry.LocalTransformer.Matrix))
+        #obj.matrix_world = Matrix(Model.Geometry.WorldTransformer.Matrix)
         return obj
 
 
@@ -337,29 +467,73 @@ def import_zwo(zwoPath, texturesPath):
             tex.pack(data=bytes(tex_data), data_len= len(tex_data))
             tex.source = "FILE"
     
+
     for mat in Materials:
         material = bpy.data.materials.new(mat.Name)
+        material.use_backface_culling = True
         material.use_nodes = True
+        nodes = material.node_tree.nodes
+        links = material.node_tree.links
 
-        bsdf = material.node_tree.nodes["Principled BSDF"]
+        # Clear default nodes
+        for node in nodes:
+            nodes.remove(node)
 
-        texture = material.node_tree.nodes.new("ShaderNodeTexImage")
-        
+        # Create output and Diffuse BSDF
+        output = nodes.new(type="ShaderNodeOutputMaterial")
+        output.location = (400, 0)
+
+        diffuse = nodes.new(type="ShaderNodeBsdfDiffuse")
+        diffuse.location = (200, 0)
+
+        links.new(diffuse.outputs['BSDF'], output.inputs['Surface'])
+
+        # Texture node
+        texture = nodes.new("ShaderNodeTexImage")
+        texture.location = (0, 200)
+
         if load_from_folder:
-            path = os.path.join(texturesPath, mat.TextureName + ".bmp")
-            #check if texture exists
-            if os.path.exists(path):
-            #if bpy.data.images.get(mat.TextureName):
-                texture.image = bpy.data.images.get(mat.TextureName)
-            else:
-                path = os.path.join(texturesPath, mat.TextureName + ".tga")
-            
-            if os.path.exists(path):
-                texture.image = bpy.data.images.load(path)
+            path_bmp = os.path.join(texturesPath, mat.TextureName + ".bmp")
+            path_tga = os.path.join(texturesPath, mat.TextureName + ".tga")
+            if os.path.exists(path_bmp):
+                texture.image = bpy.data.images.load(path_bmp)
+            elif os.path.exists(path_tga):
+                texture.image = bpy.data.images.load(path_tga)
         else:
             texture.image = bpy.data.images.get(mat.TextureName)
 
-        material.node_tree.links.new(bsdf.inputs['Base Color'], texture.outputs['Color'])
+        # Vertex color node
+        vcol = nodes.new(type="ShaderNodeVertexColor")
+        vcol.layer_name = "Color_0"  # adjust if your vertex color layer has a different name
+        vcol.location = (0, -100)
+
+        # Multiply vertex color by texture
+        multiply = nodes.new(type="ShaderNodeMixRGB")
+        multiply.blend_type = 'MULTIPLY'
+        multiply.inputs['Fac'].default_value = 0.1
+        multiply.location = (150, 100)
+        links.new(texture.outputs['Color'], multiply.inputs['Color1'])
+        links.new(vcol.outputs['Color'], multiply.inputs['Color2'])
+
+        # Connect multiply result to Diffuse color
+        links.new(multiply.outputs['Color'], diffuse.inputs['Color'])
+
+        # Connect alpha from texture to Material Output (requires Transparent BSDF setup)
+        # Diffuse BSDF doesn't have alpha input, so we need a Mix Shader for transparency
+        transparent = nodes.new(type="ShaderNodeBsdfTransparent")
+        transparent.location = (200, -200)
+
+        alpha_mix = nodes.new(type="ShaderNodeMixShader")
+        alpha_mix.location = (350, -100)
+
+        links.new(diffuse.outputs['BSDF'], alpha_mix.inputs[2])      # Shader 2 = opaque
+        links.new(transparent.outputs['BSDF'], alpha_mix.inputs[1])  # Shader 1 = transparent
+        links.new(texture.outputs['Alpha'], alpha_mix.inputs['Fac']) # alpha controls mix
+        links.new(alpha_mix.outputs['Shader'], output.inputs['Surface'])
+
+        # Enable transparency
+        #material.blend_method = 'BLEND'
+
 
 
     for Model in Models:
