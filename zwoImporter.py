@@ -265,8 +265,8 @@ def import_zwo(zwoPath, texturesPath):
             color_layer.data.foreach_set("color", loop_colors.flatten())
             
             
-        obj.data.transform(Matrix(Model.Geometry.LocalTransformer.Matrix))
-        obj.matrix_world = Matrix(Model.Geometry.WorldTransformer.Matrix)
+        obj.data.transform(Matrix(Model.Geometry.LocalTransformers[0].Matrix))
+        obj.matrix_world = Matrix(Model.Geometry.WorldTransformers[0].Matrix)
         
         return obj
         
@@ -290,26 +290,12 @@ def import_zwo(zwoPath, texturesPath):
 
         bm = bmesh.new()
         
-        #weight layer
-        w_layer = bm.verts.layers.deform.new("weights")
-        
-        
         vertex_buffer = Model.VertexBuffers[0].Vertices
         for v in vertex_buffer["position"]:
             bm.verts.new(v)
 
         bm.verts.ensure_lookup_table()
 
-        '''for f in Model.FaceBuffer.Faces:
-            try:
-                face = bm.faces.new([bm.verts[i] for i in f.Indices])
-                face.smooth = True
-                bm.faces.ensure_lookup_table()
-                bm.faces.index_update()
-                face.material_index = f.MaterialIndex
-            except:
-                pass'''
-                
         for f in Model.FaceBuffer.Faces:
             try:
                 face = bm.faces.new([bm.verts[i] for i in f['indices']])
@@ -413,20 +399,7 @@ def import_zwo(zwoPath, texturesPath):
         
         bpy.context.view_layer.objects.active = armature
         bpy.ops.object.mode_set(mode='EDIT')
-        
-        '''for i, zwoBone in enumerate(Skeleton.Bones):
-            BoneDict[zwoBone.Name] = i
 
-            edit_bone = armature.data.edit_bones.new(zwoBone.Name)
-            edit_bone.matrix = Matrix(zwoBone.Matrix)
-            edit_bone.tail = edit_bone.head + Vector((0, 2, 0))
-        
-        # set parents
-        for i, zwoBone in enumerate(Skeleton.Bones):
-            edit_bone = armature.data.edit_bones[i]
-            for childIndex in zwoBone.ChildIndices:
-                child_bone = armature.data.edit_bones[childIndex]
-                child_bone.parent = edit_bone'''
 
         def add_bone(bone, parent, index):
             boneName = bone.Name
@@ -439,7 +412,16 @@ def import_zwo(zwoPath, texturesPath):
             if parent:
                 b.parent = parent
                 b.matrix = Matrix(bone.Matrix)
+            else:
+                if bone.ChildIndices:
+                    # get the first child to set the head position
+                    firstChild = Skeleton.Bones[bone.ChildIndices[0]]
+                    childMatrix = Matrix(firstChild.Matrix)
+                    
+                    translation = childMatrix.translation
+                    matrix = Matrix.LocRotScale(translation, Euler((0, 0, radians(-90))), (1,1,1))
 
+                    b.matrix = matrix
             parent = b
             
 
@@ -557,99 +539,106 @@ def import_zwo(zwoPath, texturesPath):
                 AnimSkeleton = obj
         
         if AnimSkeleton:
-            #let's test the first animation
-            anim: zwoSkeletalAnimation = Animations[0]
-
-            #create an action
-            action = bpy.data.actions.new(name = anim.Entity.Name)
-            curves = anim.Curves
-            #set fps to 30
-            bpy.context.scene.render.fps = 30
-
-            #adjust the timeline
-            bpy.context.scene.frame_start = 0
-            bpy.context.scene.frame_end = anim.FrameCount
-
+            for anim in Animations:
             
-            for bone, entry in zip(AnimSkeleton.pose.bones, anim.Entries):
-                print(bone.name)
-                print(entry.EntryTypeFlag, entry.CurveStartIndex, entry.CurvesPerFrame)
+                #create anim data
+                if not AnimSkeleton.animation_data:
+                    AnimSkeleton.animation_data_create()
 
-                #bone info
-                b = obj.data.bones[bone.name]
+                #create an action
+                action = bpy.data.actions.new(name = anim.Entity.Name)
 
-                if b.parent:
-                    matrix = b.parent.matrix_local.inverted() @ b.matrix_local
-                else:
-                    matrix = b.matrix_local
+                AnimSkeleton.animation_data.action = action
+                if bpy.app.version >= (4, 4, 0):
+        
+                    #check if an action slot exists for this armature
+                    slot = AnimSkeleton.animation_data.action.slots.get(f"OB{AnimSkeleton.name}")
 
-                loc, rot, scale = matrix.decompose()
-
-
-                entry: Entry
-                entryType = entry.EntryTypeFlag
-                curveIndex = entry.CurveStartIndex
-                if entryType & 1:
-                    bone.rotation_quaternion = convertRotation(curves[curveIndex], rot)
-                    bone.keyframe_insert(data_path = "rotation_quaternion", frame = 0)
-                    curveIndex += 1
-
-                    new_loc = Vector(curves[curveIndex][:3])
-                    bone.location = Vector(new_loc) - loc
-                    #bone.location = Vector((new_loc[0], new_loc[2], new_loc[1])) - loc
-                    bone.keyframe_insert(data_path = "location", frame = 0)
-                    curveIndex += 1
-
-                    bone.scale = Vector(curves[curveIndex][x] for x in range(3))
-                    bone.keyframe_insert(data_path = "scale", frame = 0)
-                    curveIndex += 1
+                    if not slot:
+                        print(f"No action slot found for armature {AnimSkeleton.name}, creating a new one.")
+                        slot = AnimSkeleton.animation_data.action.slots.new(id_type='OBJECT', name=AnimSkeleton.name)
+                    
+                    AnimSkeleton.animation_data.action_slot = slot
                 
-                if entryType == 3:
+                fcurves = action.fcurves
 
-                    for i in range(anim.FrameCount - 1):
-                        #new_rotation = curves[curveIndex]
+                #set fps to 30
+                bpy.context.scene.render.fps = 30
+
+                #adjust the timeline
+                bpy.context.scene.frame_start = 0
+                bpy.context.scene.frame_end = anim.FrameCount-1
+
+                
+                for bone, entry in zip(AnimSkeleton.pose.bones, anim.Entries):
+                    #bone info
+                    edit_bone = obj.data.bones[bone.name]
+
+                    if edit_bone.parent:
+                        matrix = edit_bone.parent.matrix_local.inverted() @ edit_bone.matrix_local
+                    else:
+                        matrix = edit_bone.matrix_local
+
+
+                    loc, rot, scale = matrix.decompose()
+                    if not edit_bone.parent:
+                        rot = Quaternion()
+                    
+                    target = bone
+
+
+                    entry: Entry
+                    entryType = entry.EntryTypeFlag
+                    curveIndex = entry.CurveStartIndex
+                    
+                    pos_data_path = f'pose.bones["{bone.name}"].location'
+                    rot_data_path = f'pose.bones["{bone.name}"].rotation_quaternion'
+                    scale_data_path = f'pose.bones["{bone.name}"].scale'
+                    
+                    group_name = bone.name
+                    
+                    if entry.positionCurves:
+                    
+                        positions = np.array(list(entry.positionCurves.values()))
+                        positions -= loc
                         
-                        bone.rotation_quaternion = convertRotation(curves[curveIndex], rot)
-                        bone.keyframe_insert(data_path = "rotation_quaternion", frame = i + 1)
-                        curveIndex += 1
-                
-                elif entryType == 5:
+                        posFrames = np.array(list(entry.positionCurves.keys()))
+                        flattened = np.stack((posFrames, positions[:,0], positions[:,1], positions[:,2]), axis=1).flatten()
+                        insertFrames(fcurves, group_name, pos_data_path, len(posFrames), flattened)
+                    
+                    if entry.rotationCurves:
+                    
+                        # rotations
+                        rotFrames = np.array(list(entry.rotationCurves.keys()))
+                        rotations = np.array(list(entry.rotationCurves.values()))[:, [3,0,1,2]]
 
-                    for i in range(anim.FrameCount - 1):
-                        new_loc = Vector(curves[curveIndex][:3])
-                        bone.location = Vector(new_loc) - loc
-                        #bone.location = Vector((new_loc[0], new_loc[2], new_loc[1])) - loc
-                        bone.keyframe_insert(data_path = "location", frame = i + 1)
-                        curveIndex += 1
-
-                elif entryType == 7:
-                    for i in range(anim.FrameCount - 1):
-                        bone.rotation_quaternion = convertRotation(curves[curveIndex], rot)
-                        bone.keyframe_insert(data_path = "rotation_quaternion", frame = i + 1)
-                        curveIndex += 1
-
-                        new_loc = Vector(curves[curveIndex][:3])
-                        bone.location = Vector(new_loc) - loc
-                        #bone.location = Vector((new_loc[0], new_loc[2], new_loc[1])) - loc
-                        bone.keyframe_insert(data_path = "location", frame = i + 1)
-                        curveIndex += 1
-
+                        rotations = np.array([convertRotation(v, rot) for v in rotations])
+                        flattened = np.stack((rotFrames, rotations[:,0], rotations[:,1], rotations[:,2], rotations[:,3]), axis=1).flatten()
+                        insertFrames(fcurves, group_name, rot_data_path, len(rotFrames), flattened, valCount=4)
 
 def convertRotation(rotation, bone_rotation):
-    rotation = Quaternion((rotation[3], rotation[0], rotation[1], rotation[2]))
-    
-    return bone_rotation.rotation_difference(rotation)
-
-def insertFrames(action, group_name, data_path, values, values_count):
-    if len(values):
-        for i in range(values_count):
-            fc = action.fcurves.new(data_path=data_path, index=i, action_group=group_name)
-            fc.keyframe_points.add(len(values.keys()))
-            fc.keyframe_points.foreach_set('co', [x for co in list(map(lambda f, v: (f, v[i]), values.keys(), values.values())) for x in co])
-
-            fc.update()
+    return bone_rotation.rotation_difference(Quaternion(rotation))
 
 
+def insertFrames(fcurves, group_name, data_path, kf_count, flattened_values, valCount=3):
+    if kf_count == 0:
+        return
+
+    arr = np.asarray(flattened_values, dtype=np.float32).reshape(kf_count, 1 + valCount)
+    frames = arr[:, 0]
+
+    for i in range(valCount):
+        values = arr[:, i + 1]
+        fc = fcurves.new(data_path=data_path, index=i, action_group=group_name)
+        fc.keyframe_points.add(kf_count)
+
+        # Build (frame, value) pairs interleaved
+        co = np.empty(kf_count * 2, dtype=np.float32)
+        co[0::2] = frames
+        co[1::2] = values
+
+        fc.keyframe_points.foreach_set('co', co)
+        fc.update()
 
 def menu_func_import(self, context):
     self.layout.operator(ZWO_IMPORTER_OT_IMPORT.bl_idname,
