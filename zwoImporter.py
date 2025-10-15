@@ -387,7 +387,7 @@ def import_zwo(zwoPath, texturesPath):
         
         
         #obj.data.transform(Matrix(Model.Geometry.LocalTransformer.Matrix))
-        #obj.matrix_world = Matrix(Model.Geometry.WorldTransformer.Matrix)
+        obj.matrix_world = Matrix(Model.Geometry.WorldTransformers[0].Matrix)
         return obj
 
 
@@ -411,8 +411,14 @@ def import_zwo(zwoPath, texturesPath):
             
             if parent:
                 b.parent = parent
-                b.matrix = Matrix(bone.Matrix)
-            else:
+                
+            matrix = Matrix(bone.Matrix)
+            
+            #check the validity of the matrix by calculating its determinant
+            if abs(matrix.determinant()) < 1e-6:
+                print(f"Warning: Bone {boneName} has an invalid transformation matrix.")
+                matrix = Matrix.Identity(4)
+            
                 if bone.ChildIndices:
                     # get the first child to set the head position
                     firstChild = Skeleton.Bones[bone.ChildIndices[0]]
@@ -421,7 +427,7 @@ def import_zwo(zwoPath, texturesPath):
                     translation = childMatrix.translation
                     matrix = Matrix.LocRotScale(translation, Euler((0, 0, radians(-90))), (1,1,1))
 
-                    b.matrix = matrix
+            b.matrix = matrix
             parent = b
             
 

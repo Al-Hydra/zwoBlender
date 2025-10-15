@@ -54,11 +54,11 @@ class zwoSkeletalAnimation(BrStruct):
                 curveIndex += 3
             
             if entryType == 3: # keyframed rot
-                entry.rotationCurves = {i: self.Curves[curveIndex + i] for i in range(1, self.FrameCount-1)}
+                entry.rotationCurves.update({i: self.Curves[curveIndex + i - 1] for i in range(1, self.FrameCount)})
                 curveIndex += self.FrameCount - 1
             
             if entryType == 5: # keyframed pos
-                entry.positionCurves = {i: self.Curves[curveIndex + i][:3] for i in range(1, self.FrameCount-1)}
+                entry.positionCurves.update({i: self.Curves[curveIndex + i - 1][:3] for i in range(1, self.FrameCount)})
                 curveIndex += self.FrameCount - 1
             if entryType == 7: # keyframed pos and rot
                 
