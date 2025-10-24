@@ -255,12 +255,18 @@ def import_zwo(zwoPath, texturesPath):
         if "color0" in vertex_buffer.dtype.names:
             color_layer = mesh.vertex_colors.new(name = "Color_0")
             colors = vertex_buffer["color0"] / 255.0
+
+            colors = colors[:, [1, 2, 3, 0]]
+
             loop_colors = colors[loop_vertex_indices]
             color_layer.data.foreach_set("color", loop_colors.flatten())
         
         if "color1" in vertex_buffer.dtype.names:
             color_layer = mesh.vertex_colors.new(name = "Color_1")
             colors = vertex_buffer["color1"] / 255.0
+            
+            colors = colors[:, [1, 2, 3, 0]]
+            
             loop_colors = colors[loop_vertex_indices]
             color_layer.data.foreach_set("color", loop_colors.flatten())
             
@@ -376,12 +382,19 @@ def import_zwo(zwoPath, texturesPath):
         if "color0" in vertex_buffer.dtype.names:
             color_layer = mesh.vertex_colors.new(name = "Color_0")
             colors = vertex_buffer["color0"] / 255.0
+            
+            #rearrange colors from ARGB to RGBA
+            colors = colors[:, [1, 2, 3, 0]]
             loop_colors = colors[loop_vertex_indices]
             color_layer.data.foreach_set("color", loop_colors.flatten())
         
         if "color1" in vertex_buffer.dtype.names:
             color_layer = mesh.vertex_colors.new(name = "Color_1")
             colors = vertex_buffer["color1"] / 255.0
+            
+            #rearrange colors from ARGB to RGBA
+            colors = colors[:, [1, 2, 3, 0]]
+
             loop_colors = colors[loop_vertex_indices]
             color_layer.data.foreach_set("color", loop_colors.flatten())
         
@@ -498,7 +511,7 @@ def import_zwo(zwoPath, texturesPath):
         # Multiply vertex color by texture
         multiply = nodes.new(type="ShaderNodeMixRGB")
         multiply.blend_type = 'MULTIPLY'
-        multiply.inputs['Fac'].default_value = 0.1
+        multiply.inputs['Fac'].default_value = 1
         multiply.location = (150, 100)
         links.new(texture.outputs['Color'], multiply.inputs['Color1'])
         links.new(vcol.outputs['Color'], multiply.inputs['Color2'])
@@ -516,7 +529,11 @@ def import_zwo(zwoPath, texturesPath):
 
         links.new(diffuse.outputs['BSDF'], alpha_mix.inputs[2])      # Shader 2 = opaque
         links.new(transparent.outputs['BSDF'], alpha_mix.inputs[1])  # Shader 1 = transparent
-        links.new(texture.outputs['Alpha'], alpha_mix.inputs['Fac']) # alpha controls mix
+        
+        if texture.image:
+            links.new(texture.outputs['Alpha'], alpha_mix.inputs['Fac']) # alpha controls mix
+        else:
+            alpha_mix.inputs['Fac'].default_value = 1.0  # fully opaque if no alpha
         links.new(alpha_mix.outputs['Shader'], output.inputs['Surface'])
 
         # Enable transparency

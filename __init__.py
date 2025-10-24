@@ -21,6 +21,7 @@ def register():
     bpy.utils.register_class(ZWO_IMPORTER_OT_DROP)
     bpy.utils.register_class(ZWO_FH_IMPORT)
     bpy.utils.register_class(DIC_FH_IMPORT)
+    bpy.utils.register_class(DIP_FH_IMPORT)
     bpy.types.TOPBAR_MT_file_import.append(menu_func_import)
     
     bpy.utils.register_class(ZWO_IMPORTER_OT_EXPORT)
@@ -32,6 +33,7 @@ def unregister():
         bpy.utils.unregister_class(ZWO_IMPORTER_OT_DROP)
         bpy.utils.unregister_class(ZWO_FH_IMPORT)
         bpy.utils.unregister_class(DIC_FH_IMPORT)
+        bpy.utils.unregister_class(DIP_FH_IMPORT)
         bpy.types.TOPBAR_MT_file_import.remove(menu_func_import)
         
         bpy.utils.unregister_class(ZWO_IMPORTER_OT_EXPORT)
